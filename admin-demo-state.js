@@ -155,6 +155,43 @@
     });
   }
 
+  function selfHostedRows(contextId, options = {}) {
+    const provider = providerRows(options);
+    const organization = new Map(organizationRows(contextId, { ...options, viewer: "tenant" }).map((row) => [row.id, row]));
+    return provider.map((row) => {
+      const organizationRow = organization.get(row.id) || {};
+      const registrationReady = row.registrationState === "configured" && row.globalAvailable;
+      const detailActions = (row.detailActions || [])
+        .filter((action) => !["enable-provider-integration", "disable-provider-integration"].includes(action.command))
+        .map((action) => action.targetRouteId === "PROV-MAIL-PROFILES-001"
+          ? { ...action, targetRouteId: "ADM-MAIL-PROFILES-001" }
+          : action);
+      return {
+        id: row.id,
+        role: row.role,
+        subtitle: row.subtitle,
+        purpose: row.purpose,
+        connection: row.connection,
+        registration: row.registrationState === "configured" ? "Настроена" : "Требует настройки",
+        userAccess: registrationReady ? (organizationRow.tenantEnabled ? "Разрешён" : "Запрещён") : "Недоступен до настройки",
+        globalAvailable: row.globalAvailable,
+        providerAllowed: registrationReady,
+        tenantEnabled: registrationReady && Boolean(organizationRow.tenantEnabled),
+        enabled: registrationReady && Boolean(organizationRow.tenantEnabled),
+        toggleKind: registrationReady ? "integration-role" : undefined,
+        registrationState: row.registrationState,
+        oauthClientId: row.oauthClientId,
+        callbackPath: row.callbackPath,
+        oauthScopes: row.oauthScopes,
+        scopes: row.scopes,
+        detailHint: registrationReady
+          ? "Регистрация настроена. Доступ пользователей этой установки управляется переключателем в таблице."
+          : "Сначала настройте регистрацию роли; до этого она не предлагается пользователям.",
+        detailActions,
+      };
+    });
+  }
+
   function setGlobalAvailability(roleId, available) {
     if (!roleDefinitions.some((role) => role.id === roleId)) return false;
     globalAvailability.set(roleId, Boolean(available));
@@ -178,6 +215,7 @@
   global.AuroraAdminDemoState = Object.freeze({
     providerRows,
     organizationRows,
+    selfHostedRows,
     setGlobalAvailability,
     setOrganizationProviderAllowed,
     setTenantEnabled,

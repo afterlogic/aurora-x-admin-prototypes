@@ -12,7 +12,8 @@
   const groups = Array.isArray(config.groups) ? config.groups : [];
   const routes = groups.flatMap((group) => group.items.map((item) => ({ ...item, group: group.title })));
   const routeMap = new Map(routes.map((route) => [route.id, route]));
-  const requestedRoute = String(options.requestedRoute || "").trim();
+  const rawRequestedRoute = String(options.requestedRoute || "").trim();
+  const requestedRoute = config.routeAliases?.[rawRequestedRoute] || rawRequestedRoute;
   const initialHistoryState = global.history?.state || {};
   const historyWorkspaceKey = `${config.surface || "admin"}:${config.scope?.value || ""}`;
   const startRoute = routeMap.has(config.startRoute) ? config.startRoute : routes[0]?.id;
@@ -341,7 +342,7 @@
 
   function renderTopbar() {
     const isProvider = config.surface === "provider";
-    const providerPlaceholder = config.workspaceKind === "установка" ? "Найти настройку установки" : config.workspaceKind === "провайдер" ? "Найти в разделе провайдера" : config.workspaceKind === "реселлер" ? "Найти организацию реселлера" : "Найти в выбранной организации";
+    const providerPlaceholder = config.selfHostedMode ? "Найти пользователя или настройку" : config.workspaceKind === "установка" ? "Найти настройку установки" : config.workspaceKind === "провайдер" ? "Найти в разделе провайдера" : config.workspaceKind === "реселлер" ? "Найти организацию реселлера" : "Найти в выбранной организации";
     return `
       <header class="aa-topbar">
         <div class="aa-brand">
@@ -371,6 +372,7 @@
 
   function renderScopeCard() {
     const scope = config.scope || {};
+    if (config.scopeNavigation === false) return "";
     if (config.surface !== "provider") {
       const snapshot = config.capabilitySnapshot;
       return `
@@ -679,17 +681,24 @@
 
   function renderPolicy(route) {
     const rows = route.policyRows || [];
+    const policySubtitle = config.selfHostedMode
+      ? "Лицензия и системные ограничения → настройки этой установки; доступные значения можно только сужать"
+      : "Глобальная политика провайдера → тариф и набор возможностей → политика организации; нижний уровень может только сужать разрешения";
+    const lockedOrigin = config.selfHostedMode ? " · задаётся системой" : " · задаётся провайдером";
+    const overrideLabel = config.selfHostedMode ? "Значение для этой установки" : "Переопределение текущего уровня";
+    const inheritedChip = config.selfHostedMode ? "Системное ограничение" : "Унаследовано";
+    const resetLabel = config.selfHostedMode ? "Сбросить к системному" : "Сбросить к унаследованному";
     return `
       <section class="aa-card">
-        <div class="aa-card-head"><div><div class="aa-card-title">Итоговая политика</div><div class="aa-card-subtitle">Глобальная политика провайдера → тариф и набор возможностей → политика организации; нижний уровень может только сужать разрешения</div></div>${chip(`Версия изменений: ${route.revision || "42"}`)}</div>
+        <div class="aa-card-head"><div><div class="aa-card-title">Итоговая политика</div><div class="aa-card-subtitle">${esc(policySubtitle)}</div></div>${chip(`Версия изменений: ${route.revision || "42"}`)}</div>
         <div class="aa-policy-list">${rows.map((row) => `
           <div class="aa-policy-row">
-            <div><div class="aa-policy-name">${esc(row.name)}</div><div class="aa-policy-origin">Источник: ${esc(row.origin)}${row.locked ? " · задаётся провайдером" : ""}</div>${row.explanation ? `<div class="aa-row-meta">${esc(row.explanation)}</div>` : ""}</div>
+            <div><div class="aa-policy-name">${esc(row.name)}</div><div class="aa-policy-origin">Источник: ${esc(row.origin)}${row.locked ? esc(lockedOrigin) : ""}</div>${row.explanation ? `<div class="aa-row-meta">${esc(row.explanation)}</div>` : ""}</div>
             <div><span class="aa-muted aa-small">Действует</span><div class="aa-effective">${esc(row.effective)}</div></div>
-            <label class="aa-field"><span class="aa-field-label">Переопределение текущего уровня</span>${row.options ? `<select class="aa-select" ${row.locked ? "disabled" : ""}>${row.options.map((option) => `<option ${option === row.draft ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>` : `<input class="aa-input" value="${esc(row.draft || row.effective)}" ${row.locked ? "readonly" : ""}>`}</label>
-            ${row.locked ? chip("Унаследовано", "warning") : chip("Можно изменить", "success")}
+            <label class="aa-field"><span class="aa-field-label">${esc(overrideLabel)}</span>${row.options ? `<select class="aa-select" ${row.locked ? "disabled" : ""}>${row.options.map((option) => `<option ${option === row.draft ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>` : `<input class="aa-input" value="${esc(row.draft || row.effective)}" ${row.locked ? "readonly" : ""}>`}</label>
+            ${row.locked ? chip(inheritedChip, "warning") : chip("Можно изменить", "success")}
           </div>`).join("")}</div>
-        <div class="aa-form-actions" style="padding:0 16px 18px">${button("reset-inherited", "Сбросить к унаследованному", "ghost")}${button("preview", "Проверить последствия")}${button("publish", "Опубликовать", "primary")}</div>
+        <div class="aa-form-actions" style="padding:0 16px 18px">${button("reset-inherited", resetLabel, "ghost")}${button("preview", "Проверить последствия")}${button("publish", "Опубликовать", "primary")}</div>
       </section>`;
   }
 
@@ -751,10 +760,14 @@
 
   function renderMatrix(route) {
     const columns = route.matrixColumns || [];
+    const capabilityTitle = config.selfHostedMode ? "Доступность для пользователей" : "Возможности организации";
+    const capabilitySubtitle = config.selfHostedMode
+      ? "Лицензия определяет доступный набор; здесь задаётся его использование в этой установке"
+      : "Эти возможности действуют для организации целиком и назначаются провайдером";
     const tenantCapabilities = (route.tenantCapabilities || []).length ? `
       <section class="aa-card aa-card-pad" style="margin-bottom:var(--aa-space)">
-        <div class="aa-card-title">Возможности организации</div>
-        <div class="aa-card-subtitle">Эти возможности действуют для организации целиком и назначаются провайдером</div>
+        <div class="aa-card-title">${esc(capabilityTitle)}</div>
+        <div class="aa-card-subtitle">${esc(capabilitySubtitle)}</div>
         <div class="aa-impact-list">${route.tenantCapabilities.map((capability) => `
           <div class="aa-impact-row">
             <div><strong>${esc(capability.name)}</strong><div class="aa-row-meta">${esc(capability.description || "")}</div></div>
@@ -916,7 +929,15 @@
 
   function renderSystemSettings(route) {
     const currentValues = { ...Object.fromEntries((route.fields || []).map((field) => [field.key, field.value])), ...(state.systemSettingsByRoute[route.id] || {}) };
-    return `<section class="aa-card"><div class="aa-card-head"><div><div class="aa-card-title">Системная идентичность и значения по умолчанию</div><div class="aa-card-subtitle">Эти значения принадлежат провайдеру и не являются брендированием выбранной организации</div></div>${chip("Провайдер")}</div><div class="aa-form"><div class="aa-form-grid">${(route.fields || []).map((field) => `<label class="aa-field"><span class="aa-field-label">${esc(field.label)}</span><input class="aa-input" data-system-setting-key="${esc(field.key)}" value="${esc(currentValues[field.key])}">${field.help ? `<span class="aa-help">${esc(field.help)}</span>` : ""}</label>`).join("")}</div><div class="aa-notice" data-tone="info"><span class="aa-notice-symbol">i</span><div>Название мобильного приложения здесь меняет тексты интерфейса и сообщений. Название и значок в магазине приложений требуют отдельной подписанной сборки провайдера.</div></div><div class="aa-form-actions">${button("save-system-settings", "Сохранить системные настройки", "primary")}</div></div></section>`;
+    const identityTitle = config.selfHostedMode ? "Системная идентичность" : "Системная идентичность и значения по умолчанию";
+    const identitySubtitle = config.selfHostedMode
+      ? "Общие названия и адреса установки; брендирование настраивается отдельно"
+      : "Эти значения принадлежат провайдеру и не являются брендированием выбранной организации";
+    const identityOwner = config.selfHostedMode ? "Система" : "Провайдер";
+    const mobileBuildNote = config.selfHostedMode
+      ? "Название мобильного приложения здесь меняет тексты интерфейса и сообщений. Название и значок в магазине приложений требуют отдельной подписанной сборки приложения."
+      : "Название мобильного приложения здесь меняет тексты интерфейса и сообщений. Название и значок в магазине приложений требуют отдельной подписанной сборки провайдера.";
+    return `<section class="aa-card"><div class="aa-card-head"><div><div class="aa-card-title">${esc(identityTitle)}</div><div class="aa-card-subtitle">${esc(identitySubtitle)}</div></div>${chip(identityOwner)}</div><div class="aa-form"><div class="aa-form-grid">${(route.fields || []).map((field) => `<label class="aa-field"><span class="aa-field-label">${esc(field.label)}</span><input class="aa-input" data-system-setting-key="${esc(field.key)}" value="${esc(currentValues[field.key])}">${field.help ? `<span class="aa-help">${esc(field.help)}</span>` : ""}</label>`).join("")}</div><div class="aa-notice" data-tone="info"><span class="aa-notice-symbol">i</span><div>${esc(mobileBuildNote)}</div></div><div class="aa-form-actions">${button("save-system-settings", "Сохранить системные настройки", "primary")}</div></div></section>`;
   }
 
   function renderRoute(route) {
@@ -2065,8 +2086,9 @@
       setRowOverride(state.routeId, recordId, { enabled: target.checked, tenantEnabled: target.checked, access: target.checked ? "Разрешена" : "Запрещена", availability: target.checked ? "Разрешён" : "Запрещён" });
       if (isIntegrationRole && !alternativeActive(state.routeId)) options.onTenantIntegrationAvailabilityChange?.(recordId, target.checked);
       const isGoogleSignIn = recordId === "google-sign-in";
+      const audience = config.selfHostedMode ? "всем пользователям" : "всем пользователям организации";
       state.runtimeByRoute[state.routeId] = target.checked
-        ? { title: isIntegrationRole ? "Роль разрешена" : "Профиль разрешён", text: isGoogleSignIn ? "Вход через Google теперь предлагается всем пользователям организации. Каждый пользователь связывает собственную Google-личность." : `Подключение «${record?.role || record?.name || "внешний сервис"}» теперь доступно всем пользователям организации для новых подключений. Каждый пользователь подтверждает собственный доступ.`, tone: "success" }
+        ? { title: isIntegrationRole ? "Роль разрешена" : "Профиль разрешён", text: isGoogleSignIn ? `Вход через Google теперь предлагается ${audience}. Каждый пользователь связывает собственную Google-личность.` : `Подключение «${record?.role || record?.name || "внешний сервис"}» теперь доступно ${audience} для новых подключений. Каждый пользователь подтверждает собственный доступ.`, tone: "success" }
         : { title: isGoogleSignIn ? "Вход через Google запрещён" : "Новые подключения запрещены", text: isGoogleSignIn ? "Вход через Google больше не предлагается. Существующие связи внешней личности не удалены автоматически." : `${record?.role || record?.name || "Подключение"} больше не предлагается для новых подключений. Существующие подключения и пользовательские разрешения не изменены.`, tone: "warning" };
       render();
       return;

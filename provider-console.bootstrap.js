@@ -6,7 +6,7 @@
     throw new Error("Aurora Provider Console bootstrap dependencies are missing");
   }
   const selfHostedEntry = host.dataset.auroraProviderMode === "self-hosted";
-  const defaultContextId = selfHostedEntry ? "installation:local" : "provider:contoso";
+  const defaultContextId = selfHostedEntry ? "self-hosted:local" : "provider:contoso";
 
   let activeProviderOptions = null;
 
@@ -16,6 +16,7 @@
     const directoryServicesEnabled = Boolean(options.directoryServicesEnabled);
     const directoryServicesRetained = Boolean(options.directoryServicesRetained);
     const multiOrganizationEnabled = options.multiOrganizationEnabled !== false;
+    const selfHostedMode = Boolean(options.selfHostedMode);
     const protectedUserSessionEnabled = Boolean(options.protectedUserSessionEnabled);
     const mailUserLifecycleHooksEnabled = Boolean(options.mailUserLifecycleHooksEnabled);
     const contextId = options.contextId || "provider:contoso";
@@ -38,6 +39,7 @@
       protectedUserSessionEnabled,
       mailUserLifecycleHooksEnabled,
       contextId,
+      selfHostedMode,
       ...systemIdentity,
     });
     activeProviderOptions = {
@@ -48,6 +50,7 @@
       protectedUserSessionEnabled,
       mailUserLifecycleHooksEnabled,
       contextId,
+      selfHostedMode,
       systemIdentity,
       showServiceMessages: options.showServiceMessages,
     };
@@ -73,6 +76,7 @@
         mountProvider({
           accessProfile,
           contextId: nextContextId,
+          selfHostedMode,
           directoryServicesEnabled,
           directoryServicesRetained,
           multiOrganizationEnabled,
@@ -88,6 +92,7 @@
         mountProvider({
           accessProfile,
           contextId,
+          selfHostedMode,
           directoryServicesEnabled,
           directoryServicesRetained,
           multiOrganizationEnabled,
@@ -112,6 +117,7 @@
           protectedUserSessionEnabled,
           mailUserLifecycleHooksEnabled,
           contextId,
+          selfHostedMode,
           systemIdentity,
         });
       },
@@ -121,6 +127,9 @@
       onOrganizationIntegrationAvailabilityChange(roleId, nextAllowed) {
         global.AuroraAdminDemoState.setOrganizationProviderAllowed(contextId, roleId, nextAllowed);
       },
+      onTenantIntegrationAvailabilityChange(roleId, nextEnabled) {
+        global.AuroraAdminDemoState.setTenantEnabled(selfHostedMode ? "tenant:default" : contextId, roleId, nextEnabled);
+      },
     });
     return global.AuroraProviderConsole;
   }
@@ -128,11 +137,17 @@
   const requestedRoute = decodeURIComponent(global.location.hash.replace(/^#/, ""));
   const query = new URLSearchParams(global.location.search);
   const requestedAccessProfile = query.get("access") || "superadmin";
-  const contextId = query.get("context") || defaultContextId;
+  const contextId = selfHostedEntry ? defaultContextId : query.get("context") || defaultContextId;
   const multiOrganizationEnabled = selfHostedEntry ? false : query.get("multi") !== "off";
-  mountProvider({ requestedRoute, contextId, accessProfile: requestedAccessProfile, multiOrganizationEnabled, protectedUserSessionEnabled: query.get("protectedSession") === "on", mailUserLifecycleHooksEnabled: query.get("mailHooks") === "on" });
+  if (selfHostedEntry && query.has("context")) {
+    const normalizedUrl = new URL(global.location.href);
+    normalizedUrl.searchParams.delete("context");
+    global.history.replaceState(global.history.state, "", normalizedUrl);
+  }
+  mountProvider({ requestedRoute, contextId, accessProfile: requestedAccessProfile, multiOrganizationEnabled, selfHostedMode: selfHostedEntry, protectedUserSessionEnabled: query.get("protectedSession") === "on", mailUserLifecycleHooksEnabled: query.get("mailHooks") === "on" });
 
   global.addEventListener("popstate", () => {
+    if (selfHostedEntry) return;
     const nextQuery = new URLSearchParams(global.location.search);
     const nextContextId = nextQuery.get("context") || defaultContextId;
     if (!activeProviderOptions || nextContextId === activeProviderOptions.contextId) return;

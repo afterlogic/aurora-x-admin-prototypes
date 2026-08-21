@@ -606,7 +606,305 @@
     };
   }
 
+  const selfHostedGroups = Object.freeze([
+    Object.freeze({ title: "Люди и доступ", routes: [
+      ["organization", "ADM-USERS-001"], ["organization", "ADM-USER-001"], ["organization", "ADM-DEPROVISION-001"],
+      ["organization", "ADM-GROUPS-001"], ["organization", "ADM-DOMAINS-001"], ["organization", "ADM-SSO-001"],
+      ["organization", "ADM-POLICY-001"], ["organization", "ADM-MOBILE-001"], ["organization", "ADM-FEATURES-001"],
+      ["organization", "ADM-QUOTAS-001"], ["organization", "AI-POLICY-001"],
+    ] }),
+    Object.freeze({ title: "Почта и интеграции", routes: [
+      ["provider", "PROV-MAIL-001"], ["organization", "ADM-MAIL-PROFILES-001"], ["installation", "PROV-INT-001"],
+    ] }),
+    Object.freeze({ title: "Инфраструктура", routes: [
+      ["installation", "PROV-DATABASE-001"], ["provider", "PROV-CLIENTS-001"], ["provider", "PROV-DIRECTORY-001"],
+      ["organization", "PROV-SCIM-001"], ["provider", "PROV-JOBS-001"], ["provider", "PROV-ADAPTER-001"],
+      ["provider", "ADM-BACKUP-001"],
+    ] }),
+    Object.freeze({ title: "Эксплуатация", routes: [
+      ["installation", "PROV-LOGS-001"], ["provider", "ADM-DIAG-001"], ["organization", "ADM-AUDIT-001"],
+      ["organization", "ADM-OPS-001"], ["organization", "ADM-STATS-001"], ["provider", "PROV-EVIDENCE-001"],
+      ["provider", "PROV-AGENT-001"],
+    ] }),
+    Object.freeze({ title: "Система", routes: [
+      ["installation", "PROV-LICENSING-001"], ["provider", "PROV-SYSTEM-001"], ["organization", "BRAND-EDITOR-001"],
+      ["provider", "BRAND-DOMAIN-001"], ["provider", "EXT-REGISTRY-001"], ["provider", "EXT-EMBED-001"],
+    ] }),
+  ]);
+
+  function routeMapFor(config) {
+    return new Map((config.groups || []).flatMap((group) => (group.items || []).map((route) => [route.id, route])));
+  }
+
+  function selfHostedVisibleStrings(value) {
+    return replaceVisibleStrings(value, [
+      ["Суперадминистратор провайдера", "Системный администратор"],
+      ["Администратор провайдера", "Администратор системы"],
+      ["Выбранная организация", "Эта установка"],
+      ["выбранной организации", "этой установки"],
+      ["дефолтной организации", "этой установки"],
+      ["Дефолтная организация", "Эта установка"],
+      ["Тарифное право", "Лицензионное право"],
+      ["тарифное право", "лицензионное право"],
+      ["Тариф провайдера", "Предел лицензии"],
+      ["тариф и набор возможностей", "лицензия и набор возможностей"],
+      ["Переопределение организации", "Настройка этой установки"],
+      ["Хранилище организации", "Общее хранилище"],
+      ["Конфиденциальность организации", "Настройка конфиденциальности"],
+      ["Согласие организации", "Согласие администратора"],
+      ["Политика организации", "Настройка этой установки"],
+      ["политика организации", "настройка этой установки"],
+      ["Недоступен организации", "Недоступно в этой установке"],
+      ["организации целиком", "всей установки"],
+      ["Провайдер", "Система"],
+      ["провайдером", "системой"],
+      ["провайдера", "системы"],
+      ["провайдерский", "системный"],
+      ["провайдерской", "системной"],
+      ["провайдер", "система"],
+    ]);
+  }
+
+  function selfHostedRoute(route, options = {}) {
+    let result = { ...selfHostedVisibleStrings(route), scope: "Эта установка" };
+    if (route.id === "PROV-LICENSING-001") {
+      return { ...result, title: "Лицензия", metrics: (result.metrics || []).filter((metric) => metric.label !== "Несколько организаций") };
+    }
+    if (route.id === "PROV-INT-001") {
+      const keepInstalledRoles = (rows) => options.googleDriveEnabled === false ? rows.filter((row) => row.id !== "google-drive") : rows;
+      return {
+        ...result,
+        clearSelectionOnLeave: true,
+        purpose: "Подключение внешних сервисов и доступ их отдельных ролей пользователям этой установки.",
+        columns: [
+          { key: "role", label: "Возможность" },
+          { key: "connection", label: "Подключение" },
+          { key: "registration", label: "Регистрация", status: true },
+          { key: "userAccess", label: "Доступ пользователям", toggle: true },
+        ],
+        rows: keepInstalledRoles(global.AuroraAdminDemoState.selfHostedRows("tenant:default")),
+        alternativeRows: keepInstalledRoles(global.AuroraAdminDemoState.selfHostedRows("tenant:default", { alternative: true })),
+        total: "3 роли внешних сервисов",
+        toggleSummaryNoun: "Ролей",
+      };
+    }
+    if (route.id === "PROV-MAIL-001") {
+      return {
+        ...result,
+        clearSelectionOnLeave: true,
+        purpose: "Основные почтовые подключения этой установки: внутренние адреса Aurora, параметры для пользователей и маршрутизация по домену.",
+        notice: { tone: "info", text: "Точный домен выбирает подключение раньше единственного сервера для остальных доменов. Параметры для пользователей показаны рядом с серверной настройкой." },
+        columns: [
+          { key: "name", label: "Подключение" },
+          { key: "routing", label: "Маршрутизация" },
+          { key: "publicImap", label: "IMAP для пользователей" },
+          { key: "publicSmtp", label: "SMTP для пользователей" },
+        ],
+        selectedSupplementalFields: [
+          { key: "internalImap", label: "Внутренний IMAP" },
+          { key: "internalSmtp", label: "Внутренний SMTP" },
+          { key: "authentication", label: "Способ входа" },
+          { key: "usernameFormat", label: "Формат имени пользователя" },
+          { key: "capabilities", label: "Возможности" },
+        ],
+        rows: (options.mailBackends || result.rows || []).map((row, index) => ({
+          ...row,
+          name: selfHostedVisibleStrings(row.name).replace("Основной сервер системы", "Основной сервер"),
+          subtitle: selfHostedVisibleStrings(row.subtitle),
+          routing: index === 1 ? "legacy.contoso.example · vip.example" : selfHostedVisibleStrings(row.routing),
+          domains: index === 1 ? "legacy.contoso.example\nvip.example" : row.domains,
+          publicImap: `${row.publicImapHost} · ${row.publicImapPort} ${row.publicImapSecurity}`,
+          publicSmtp: `${row.publicSmtpHost} · ${row.publicSmtpPort} ${row.publicSmtpSecurity}`,
+          internalImap: `${row.internalImapHost} · ${row.internalImapPort} ${row.internalImapSecurity}`,
+          internalSmtp: `${row.internalSmtpHost} · ${row.internalSmtpPort} ${row.internalSmtpSecurity}`,
+          authentication: "Пароль",
+        })),
+        total: "2 основных подключения · один сервер для остальных доменов",
+      };
+    }
+    if (route.id === "ADM-MAIL-PROFILES-001") {
+      const publicRows = (result.rows || []).map((row) => ({
+        ...row,
+        origin: row.origin === "Система" ? "Предустановлен" : row.origin,
+        detailActions: (row.detailActions || []).map((action) => action.targetRouteId === "ADM-INT-001" ? { ...action, targetRouteId: "PROV-INT-001" } : action),
+      }));
+      const privateRows = (options.privateMailProfiles || []).filter((row) => row.scopeType === "tenant_private").slice(0, 1).map((row) => ({
+        ...row,
+        origin: "Настроен администратором",
+        access: "Разрешён",
+        enabled: true,
+        toggleKind: "mail-profile",
+        detailActions: [{ command: "edit-mail-profile", label: "Изменить профиль", variant: "primary" }],
+      }));
+      return {
+        ...result,
+        clearSelectionOnLeave: true,
+        purpose: "Профили внешних ящиков, которые пользователи могут добавлять в Aurora.",
+        notice: { tone: "info", text: "OAuth-регистрация Gmail настраивается в разделе «Интеграции». Эти профили не участвуют в маршрутизации основного адреса." },
+        columns: [{ key: "name", label: "Профиль" }, { key: "origin", label: "Источник" }, { key: "authentication", label: "Вход" }, { key: "access", label: "Доступ пользователям", toggle: true }],
+        rows: [...publicRows, ...privateRows],
+        total: `${publicRows.length + privateRows.length} внешних профиля`,
+      };
+    }
+    if (route.id === "PROV-CLIENTS-001") {
+      return { ...result, title: "API и автоматизация", purpose: "Служебные учётные записи для автоматизации с ограниченными разрешениями, сроком действия и секретами только для записи." };
+    }
+    if (route.id === "PROV-ADAPTER-001") {
+      return {
+        ...result,
+        purpose: "Подключения Aurora к почте, хранилищу и корпоративным каталогам этой установки.",
+        columns: [{ key: "adapter", label: "Подключение" }, { key: "purpose", label: "Назначение" }, { key: "status", label: "Состояние", status: true }],
+        rows: (result.rows || []).map(({ usage, ...row }) => row),
+      };
+    }
+    if (route.id === "PROV-AGENT-001") {
+      return {
+        ...result,
+        purpose: "Ограниченные профили MCP/API для автоматизации и диагностики этой установки.",
+        columns: (result.columns || []).map((column) => column.key === "scope" ? { ...column, label: "Разрешения" } : column),
+        rows: (result.rows || []).filter((row) => row.id !== "agt-old").map((row) => ({
+          ...row,
+          scope: row.scope?.replace("система ·", "эта установка ·").replace("организация ·", "эта установка ·"),
+        })),
+        total: "2 профиля доступа",
+      };
+    }
+    if (route.id === "PROV-SYSTEM-001") {
+      return {
+        ...result,
+        purpose: "Общие названия и адреса этой установки Aurora.",
+        fields: (result.fields || []).filter((field) => ["productName", "mobileAppName", "supportUrl", "mailDomain"].includes(field.key)).map((field) => field.key === "mailDomain" ? { ...field, label: "Основной почтовый домен" } : field),
+      };
+    }
+    if (route.id === "BRAND-DOMAIN-001") {
+      return {
+        ...result,
+        purpose: "Публичный адрес входа, применяемое брендирование и состояние DNS/TLS этой установки.",
+        columns: [{ key: "domain", label: "Адрес входа" }, { key: "brand", label: "Брендирование" }, { key: "origin", label: "Управление DNS / TLS" }, { key: "status", label: "Состояние", status: true }],
+        rows: [{ id: "self-hosted-entry", domain: options.identity.mailDomain, brand: options.identity.defaultBrandName, origin: "Управляет администратор", status: "Активно" }],
+        total: "1 адрес входа",
+      };
+    }
+    if (route.id === "EXT-REGISTRY-001") {
+      return {
+        ...result,
+        columns: [{ key: "extension", label: "Расширение" }, { key: "capabilities", label: "Возможности" }, { key: "status", label: "Доверие", status: true }],
+        rows: (result.rows || []).map(({ rollout, ...row }) => row),
+        total: "3 расширения",
+      };
+    }
+    if (route.id === "ADM-FEATURES-001") {
+      return {
+        ...result,
+        title: "Функции",
+        purpose: "Возможности, доступные по лицензии, и правила их использования в этой установке.",
+        matrixRows: (result.matrixRows || []).map((row) => ({
+          ...row,
+          meta: row.meta.replace("Дополнение на 120 мест", "Доступно для 120 пользователей").replace("Заблокировано системой", "Заблокировано системной политикой").replace("Лицензировано", "Доступно по лицензии"),
+        })),
+      };
+    }
+    if (route.id === "ADM-QUOTAS-001") {
+      return {
+        ...result,
+        purpose: "Пределы лицензии, ограничения безопасности и значения по умолчанию для пользователей этой установки.",
+        policyRows: (result.policyRows || []).map((row) => ({
+          ...row,
+          origin: row.origin.replace("Распределение организации", "Значение по умолчанию").replace("Подписка", "Предел лицензии"),
+        })),
+      };
+    }
+    if (route.id === "AI-POLICY-001") {
+      return {
+        ...result,
+        purpose: "Лицензионная доступность ИИ, согласие, хранение и аудит без просмотра запросов и содержимого сообщений.",
+        notice: { tone: "warning", text: "Администратор видит состояние политики и агрегированные результаты, но не запросы, тела сообщений или созданное содержимое." },
+      };
+    }
+    if (route.id === "EXT-EMBED-001") {
+      return {
+        ...result,
+        purpose: "Разрешённые источники и возможности песочницы для встраиваемых элементов; полномочия общего источника не выдаются неявно.",
+        policyRows: (result.policyRows || []).map((row) => row.name === "Запуск между организациями" ? { ...row, name: "Запуск в другом контексте" } : row),
+      };
+    }
+    if (route.id === "ADM-STATS-001") {
+      return {
+        ...result,
+        title: "Использование",
+        purpose: "Сводка пользователей, хранилища и качества эксплуатационных данных этой установки.",
+        notice: null,
+        metrics: [
+          { label: "Активные пользователи", value: "3 421 из 3 478", meta: "Обновлено сегодня в 11:10" },
+          { label: "Назначенные лицензии", value: "3 478", meta: "Предел лицензии: 5 000 пользователей" },
+          { label: "Использовано хранилища", value: "8,4 ТБ", meta: "Почта и файлы" },
+          { label: "Неуспешные попытки входа", value: "18", meta: "За последние 24 часа" },
+        ],
+        attentionTitle: "Требует внимания",
+        attention: [{ title: "Неполные сведения о хранилище", meta: "Один внешний профиль не вернул сведения о квоте", status: "Требует проверки", tone: "warning" }],
+        activity: [],
+      };
+    }
+    if (route.id === "BRAND-EDITOR-001") {
+      return { ...result, purpose: "Корпоративный стиль, живой предварительный просмотр и публикация находятся на одном экране.", editorTitle: "Черновик брендирования · один профиль" };
+    }
+    return result;
+  }
+
+  function createSelfHostedConfig(options) {
+    const shared = { ...options, selfHostedMode: false, multiOrganizationEnabled: false };
+    const configs = {
+      installation: createEffectiveConfig({ ...shared, contextId: "installation:local" }),
+      provider: createEffectiveConfig({ ...shared, contextId: "provider:contoso" }),
+      organization: createEffectiveConfig({ ...shared, contextId: "tenant:default" }),
+    };
+    const fullProvider = createEffectiveConfig({ ...shared, multiOrganizationEnabled: true, contextId: "provider:contoso" });
+    const maps = Object.fromEntries(Object.entries(configs).map(([key, config]) => [key, routeMapFor(config)]));
+    const privateMailProfiles = maps.provider.get("PROV-MAIL-PROFILES-001")?.rows || [];
+    const mailBackends = routeMapFor(fullProvider).get("PROV-MAIL-001")?.rows || [];
+    const identity = configs.provider.systemIdentity;
+    const groups = selfHostedGroups.map((group) => ({
+      title: group.title,
+      items: group.routes.map(([source, routeId]) => maps[source].get(routeId)).filter(Boolean).map((route) => selfHostedRoute(route, {
+        identity,
+        googleDriveEnabled: options.googleDriveEnabled !== false,
+        privateMailProfiles,
+        mailBackends,
+      })),
+    })).filter((group) => group.items.length);
+    const routeIds = groups.flatMap((group) => group.items.map((route) => route.id));
+    const actorRoles = {
+      "superadmin": "Системный администратор",
+      "provider-admin": "Администратор системы",
+      "support": "Специалист поддержки",
+      "restricted": "Ограниченный доступ",
+    };
+    return {
+      ...configs.organization,
+      selfHostedMode: true,
+      surface: "provider",
+      surfaceLabel: `Администрирование ${identity.productName}`,
+      workspaceKind: "self-hosted",
+      startRoute: "ADM-USERS-001",
+      actor: { ...configs.organization.actor, role: actorRoles[configs.organization.actor.role] || actorRoles[options.accessProfile || "superadmin"] || "Системный администратор" },
+      scopeNavigation: false,
+      scope: { provider: identity.productName, value: "self-hosted:local", contextLabel: identity.productName, options: [{ value: "self-hosted:local", label: identity.productName, name: identity.productName }] },
+      groups,
+      contextId: "self-hosted:local",
+      routeAliases: { "ADM-MAIL-001": "PROV-MAIL-001", "ADM-INT-001": "PROV-INT-001", "PROV-MAIL-PROFILES-001": "ADM-MAIL-PROFILES-001" },
+      capabilitySnapshot: {
+        profileId: "self-hosted-single-organization",
+        label: "Возможности самостоятельной установки",
+        revision: "cap-self-hosted-1",
+        routeIds,
+        enabledFeatureKeys: configs.organization.capabilitySnapshot.enabledFeatureKeys,
+        expiresAt: configs.organization.capabilitySnapshot.expiresAt,
+      },
+    };
+  }
+
   function createEffectiveConfig(options = {}) {
+    if (options.selfHostedMode) return createSelfHostedConfig(options);
     const requestedAccessProfile = options.accessProfile;
     const accessProfile = requestedAccessProfile === undefined
       ? "superadmin"
